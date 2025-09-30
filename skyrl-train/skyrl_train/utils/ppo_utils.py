@@ -935,6 +935,87 @@ def compute_grpo_outcome_advantage(
     return scores, scores
 
 
+@register_advantage_estimator("logit_reward_norm")
+def compute_logit_reward_norm_outcome_advantage(
+    token_level_rewards: torch.Tensor,
+    response_mask: torch.Tensor,
+    index: np.ndarray,
+    epsilon: float = 0.8,
+    config: DictConfig = None,
+    mu_0: float = 1e-5,
+    **kwargs,
+) -> tuple[torch.Tensor, torch.Tensor]:
+    """
+    Group-wise logit reward normalization advantage estimator.
+
+    For each prompt/group (identified by `index`), compute the mean outcome reward \(\mu\).
+    Then scale each sample's outcome reward r by:
+
+        r * ( log((1 - \mu) * epsilon) - log(\mu * (1 - epsilon)) )
+
+    No mean subtraction is performed. The scaled scalar is broadcast over response tokens.
+
+    Args:
+        token_level_rewards: Float[torch.Tensor, "batch_size seqlen"]
+        response_mask: Float[torch.Tensor, "batch_size seqlen"]
+        index: np.ndarray group ids per sample (length batch_size)
+        epsilon: hyperparameter in (0, 1); if `config` provides `epsilon` or
+                 `reward_norm_epsilon`, those override this default.
+        config: DictConfig carrying algorithm hyperparameters
+        mu_0: float in (0, 1) lower bound to the mean to avoid instability
+    Returns:
+        advantages, returns: both token-level tensors (broadcasted scalar per sequence)
+    """
+    # compute outcome rewards per sample (sum over tokens)
+    scores = token_level_rewards.sum(dim=-1)
+
+    # Allow overriding epsilon from config
+    if config is not None:
+        # Prefer a specifically named field if present, else fall back to generic epsilon
+        eps_cfg = getattr(config, "reward_norm_epsilon", None)
+        if eps_cfg is None:
+            eps_cfg = getattr(config, "epsilon", None)
+        if eps_cfg is not None:
+            epsilon = float(eps_cfg)
+
+    # Clamp epsilon to a valid open interval (0,1) for numerical stability
+    eps_min = 1e-12
+    eps_max = 1.0 - 1e-12
+    epsilon = float(torch.clamp(torch.tensor(epsilon), eps_min, eps_max).item())
+
+    id2sum = defaultdict(list)
+    id2mean = {}
+
+    with torch.no_grad():
+        bsz = scores.shape[0]
+        device = scores.device
+        dtype = scores.dtype
+
+        # Group scores by prompt id
+        for i in range(bsz):
+            id2sum[index[i]].append(scores[i])
+
+        # Compute group means as torch scalars on the right device/dtype
+        for idx in id2sum:
+            stack = torch.stack(id2sum[idx]).to(device=device, dtype=dtype)
+            id2mean[idx] = torch.mean(stack)
+
+        # For each sample, compute the scaling factor using its group's mean
+        scaled = torch.empty_like(scores)
+        for i in range(bsz):
+            mu = id2mean[index[i]]
+            # Clamp mu to (0,1) for log-domain stability
+            mu = torch.clamp(mu, min=mu_0, max=1.0 - mu_0)
+            # s = log((1 - mu) * eps) - log(mu * (1 - eps))
+            s = torch.log((1.0 - mu) * epsilon) - torch.log(mu * (1.0 - epsilon))
+            scaled[i] = scores[i] * s
+
+        # Broadcast the per-sample scalar to token-level using the response mask
+        advantages = scaled.unsqueeze(-1) * response_mask
+
+    # Returns are identical to advantages for outcome-based estimators without a critic
+    return advantages, advantages
+
 def compute_advantages_and_returns(
     token_level_rewards: torch.Tensor,
     response_mask: torch.Tensor,
