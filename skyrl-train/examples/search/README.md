@@ -6,7 +6,7 @@ Additional Reference: [Verl+Sglang Instructions](https://github.com/zhaochenyang
 
 ## Prepare Datasets 
 ```bash
-local_dir=~/data/searchR1
+local_dir=/tmp/$USER/data/searchR1
 uv run --isolated examples/search/searchr1_dataset.py --local_dir $local_dir
 ```
 
@@ -37,7 +37,7 @@ pip install uvicorn fastapi
 ```bash
 conda activate retriever
 
-local_dir=~/data/searchR1
+local_dir=/tmp/$USER/data/searchR1
 python examples/search/searchr1_download.py --local_dir $local_dir
 cat $local_dir/part_* > $local_dir/e5_Flat.index
 gzip -d $local_dir/wiki-18.jsonl.gz
