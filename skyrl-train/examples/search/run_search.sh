@@ -12,12 +12,12 @@ DATA_DIR="$HOME/data/searchR1"
 uv run --isolated --frozen --extra vllm -m skyrl_train.entrypoints.main_base \
   data.train_data="['${DATA_DIR}/train.parquet']" \
   data.val_data="['${DATA_DIR}/validation.parquet']" \
-  trainer.algorithm.advantage_estimator="grpo" \
+  trainer.algorithm.advantage_estimator="logit_reward_norm" \
   trainer.policy.optimizer_config.lr=1.0e-6 \
   trainer.policy.optimizer_config.max_grad_norm=0.5 \
   trainer.policy.optimizer_config.num_warmup_steps=94 \
   trainer.algorithm.use_kl_loss=true \
-  trainer.algorithm.kl_loss_coef=0.001 \
+  trainer.algorithm.kl_loss_coef=0.1 \
   trainer.policy.model.path="Qwen/Qwen2.5-3B-Instruct" \
   trainer.placement.colocate_all=true \
   trainer.strategy=fsdp2 \
